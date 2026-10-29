@@ -2,6 +2,7 @@ import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
 import { cookies } from "next/headers";
+import { connection } from "next/server";
 
 import { publicEnv } from "@/lib/env";
 import type { Database } from "@/types/database";
@@ -11,6 +12,9 @@ import type { Database } from "@/types/database";
  * signed-in user (via their auth cookies), so RLS applies. Create one per request.
  */
 export async function createClient() {
+  // Supabase checks token expiry with Date.now(). Cache Components only allows time reads at
+  // request time, so mark this explicitly instead of relying on cookies() to imply it.
+  await connection();
   const cookieStore = await cookies();
 
   return createServerClient<Database>(

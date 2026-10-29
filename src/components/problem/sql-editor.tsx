@@ -137,6 +137,15 @@ export default function SqlEditor({ value, onChange, onRun, tables, error }: Sql
       run: () => onRunRef.current(),
     });
 
+    // An error marker describes the query that ran, not the text being edited: once the text
+    // changes (typing, or loading a past submission), its position no longer means anything.
+    disposables.current.push(
+      editor.onDidChangeModelContent(() => {
+        const model = editor.getModel();
+        if (model) monaco.editor.setModelMarkers(model, MARKER_OWNER, []);
+      }),
+    );
+
     // Suggest this problem's tables and columns alongside SQL keywords.
     disposables.current.push(
       monaco.languages.registerCompletionItemProvider("sql", {
