@@ -1,5 +1,12 @@
 import { defineConfig, devices } from "@playwright/test";
 
+// Locally, pick up E2E_USER_* (and the Supabase keys) from .env.local; CI sets real env vars.
+try {
+  process.loadEnvFile(".env.local");
+} catch {
+  // No .env.local: fine in CI.
+}
+
 const PORT = Number(process.env.PORT ?? 3000);
 const baseURL = process.env.PLAYWRIGHT_BASE_URL ?? `http://localhost:${PORT}`;
 
