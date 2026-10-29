@@ -3,8 +3,10 @@ import type { CaseJob, CaseRun } from "@/lib/sandbox/protocol";
 import { compareResults } from "@/lib/sql/compare";
 import { checkUserQuery } from "@/lib/sql/guard";
 import { LIMITS } from "@/lib/sql/limits";
+import type { Enums } from "@/types/database";
 
-export type SubmissionStatus = "accepted" | "wrong_answer" | "error" | "timeout";
+/** Tied to the database enum, so a migration that changes it breaks the build here. */
+export type SubmissionStatus = Enums<"submission_status">;
 export type CaseStatus = "passed" | "failed" | "error" | "timeout" | "skipped";
 
 export interface TestCaseInput {
