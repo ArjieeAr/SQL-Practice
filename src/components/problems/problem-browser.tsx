@@ -2,7 +2,7 @@
 
 import { CheckCircle2, CircleDashed, Search, X } from "lucide-react";
 import Link from "next/link";
-import { useMemo, useState } from "react";
+import { Suspense, use, useMemo, useState } from "react";
 
 import {
   filterProblems,
@@ -16,30 +16,26 @@ import { TAG_IDS, TAGS, type Tag } from "@/lib/problems/tags";
 import { DIFFICULTY_LABEL, DifficultyBadge } from "./difficulty-badge";
 
 type ProblemStatus = "solved" | "attempted";
+type Statuses = Record<string, ProblemStatus>;
 
 interface ProblemBrowserProps {
   problems: FilterableProblem[];
-  /** Null while the signed-in user's progress is still streaming in (or for the static shell). */
-  statuses: Record<string, ProblemStatus> | null;
+  /**
+   * The visitor's progress, streamed from the server. It's passed as a promise (not awaited) so
+   * this component renders once, in the static shell, and only the status-dependent parts wait.
+   * Awaiting it on the server instead would remount the browser when it arrived and reset any
+   * filters the user had already touched.
+   */
+  statusesPromise: Promise<Statuses>;
 }
 
 const DIFFICULTIES = ["all", "easy", "medium", "hard"] as const;
+const NONE = new Set<string>();
 
-export function ProblemBrowser({ problems, statuses }: ProblemBrowserProps) {
+export function ProblemBrowser({ problems, statusesPromise }: ProblemBrowserProps) {
   const [filters, setFilters] = useState<ProblemFilters>(NO_FILTERS);
   const update = (patch: Partial<ProblemFilters>) => setFilters((f) => ({ ...f, ...patch }));
 
-  const solvedSlugs = useMemo(
-    () =>
-      new Set(
-        Object.entries(statuses ?? {})
-          .filter(([, status]) => status === "solved")
-          .map(([slug]) => slug),
-      ),
-    [statuses],
-  );
-  const visible = filterProblems(problems, filters, solvedSlugs);
-  const hasStatuses = statuses !== null && Object.keys(statuses).length > 0;
   const isFiltered =
     filters.query !== "" ||
     filters.difficulty !== "all" ||
@@ -91,18 +87,13 @@ export function ProblemBrowser({ problems, statuses }: ProblemBrowserProps) {
           ))}
         </div>
 
-        {hasStatuses && (
-          <select
-            aria-label="Status"
+        <Suspense fallback={null}>
+          <StatusSelect
+            statusesPromise={statusesPromise}
             value={filters.status}
-            onChange={(e) => update({ status: e.target.value as StatusFilter })}
-            className="border-border bg-surface h-10 rounded-md border px-3 text-sm"
-          >
-            <option value="all">Any status</option>
-            <option value="solved">Solved</option>
-            <option value="unsolved">Unsolved</option>
-          </select>
-        )}
+            onChange={(status) => update({ status })}
+          />
+        </Suspense>
       </div>
 
       <div className="flex flex-wrap gap-2" aria-label="Topics">
@@ -135,66 +126,139 @@ export function ProblemBrowser({ problems, statuses }: ProblemBrowserProps) {
         )}
       </div>
 
-      <div className="border-border overflow-hidden rounded-lg border">
-        <table className="w-full text-left text-sm">
-          <thead className="bg-surface text-muted text-xs tracking-wide uppercase">
-            <tr>
-              <th scope="col" className="w-12 px-4 py-3">
-                <span className="sr-only">Status</span>
-              </th>
-              <th scope="col" className="px-2 py-3">
-                Title
-              </th>
-              <th scope="col" className="hidden px-4 py-3 md:table-cell">
-                Topics
-              </th>
-              <th scope="col" className="px-4 py-3 text-right">
-                Difficulty
-              </th>
+      {/* Until progress arrives, show the list unmarked (the status filter isn't offered yet). */}
+      <Suspense
+        fallback={
+          <ProblemTable
+            problems={filterProblems(problems, { ...filters, status: "all" }, NONE)}
+            statuses={null}
+          />
+        }
+      >
+        <ProblemTableWithStatuses
+          statusesPromise={statusesPromise}
+          problems={problems}
+          filters={filters}
+        />
+      </Suspense>
+    </div>
+  );
+}
+
+function StatusSelect({
+  statusesPromise,
+  value,
+  onChange,
+}: {
+  statusesPromise: Promise<Statuses>;
+  value: StatusFilter;
+  onChange: (status: StatusFilter) => void;
+}) {
+  const statuses = use(statusesPromise);
+  if (Object.keys(statuses).length === 0) return null; // signed out, or nothing attempted yet
+
+  return (
+    <select
+      aria-label="Status"
+      value={value}
+      onChange={(e) => onChange(e.target.value as StatusFilter)}
+      className="border-border bg-surface h-10 rounded-md border px-3 text-sm"
+    >
+      <option value="all">Any status</option>
+      <option value="solved">Solved</option>
+      <option value="unsolved">Unsolved</option>
+    </select>
+  );
+}
+
+function ProblemTableWithStatuses({
+  statusesPromise,
+  problems,
+  filters,
+}: {
+  statusesPromise: Promise<Statuses>;
+  problems: FilterableProblem[];
+  filters: ProblemFilters;
+}) {
+  const statuses = use(statusesPromise);
+  const solvedSlugs = useMemo(
+    () =>
+      new Set(
+        Object.entries(statuses)
+          .filter(([, status]) => status === "solved")
+          .map(([slug]) => slug),
+      ),
+    [statuses],
+  );
+  return (
+    <ProblemTable problems={filterProblems(problems, filters, solvedSlugs)} statuses={statuses} />
+  );
+}
+
+function ProblemTable({
+  problems,
+  statuses,
+}: {
+  problems: FilterableProblem[];
+  statuses: Statuses | null;
+}) {
+  return (
+    <div className="border-border overflow-hidden rounded-lg border">
+      <table className="w-full text-left text-sm">
+        <thead className="bg-surface text-muted text-xs tracking-wide uppercase">
+          <tr>
+            <th scope="col" className="w-12 px-4 py-3">
+              <span className="sr-only">Status</span>
+            </th>
+            <th scope="col" className="px-2 py-3">
+              Title
+            </th>
+            <th scope="col" className="hidden px-4 py-3 md:table-cell">
+              Topics
+            </th>
+            <th scope="col" className="px-4 py-3 text-right">
+              Difficulty
+            </th>
+          </tr>
+        </thead>
+        <tbody className="divide-border divide-y">
+          {problems.map((problem) => (
+            <tr key={problem.slug} className="hover:bg-surface/60 transition-colors">
+              <td className="px-4 py-3">
+                <StatusIcon status={statuses?.[problem.slug]} />
+              </td>
+              <td className="px-2 py-3">
+                <Link
+                  href={`/problems/${problem.slug}`}
+                  className="hover:text-accent font-medium transition-colors"
+                >
+                  <span className="text-muted mr-2 tabular-nums">{problem.number}.</span>
+                  {problem.title}
+                </Link>
+              </td>
+              <td className="hidden px-4 py-3 md:table-cell">
+                <div className="flex flex-wrap gap-1.5">
+                  {problem.tags.map((tag) => (
+                    <span key={tag} className="bg-surface text-muted rounded px-1.5 py-0.5 text-xs">
+                      {TAGS[tag as Tag] ?? tag}
+                    </span>
+                  ))}
+                </div>
+              </td>
+              <td className="px-4 py-3 text-right">
+                <DifficultyBadge difficulty={problem.difficulty} />
+              </td>
             </tr>
-          </thead>
-          <tbody className="divide-border divide-y">
-            {visible.map((problem) => (
-              <tr key={problem.slug} className="hover:bg-surface/60 transition-colors">
-                <td className="px-4 py-3">
-                  <StatusIcon status={statuses?.[problem.slug]} />
-                </td>
-                <td className="px-2 py-3">
-                  <Link
-                    href={`/problems/${problem.slug}`}
-                    className="hover:text-accent font-medium transition-colors"
-                  >
-                    <span className="text-muted mr-2 tabular-nums">{problem.number}.</span>
-                    {problem.title}
-                  </Link>
-                </td>
-                <td className="hidden px-4 py-3 md:table-cell">
-                  <div className="flex flex-wrap gap-1.5">
-                    {problem.tags.map((tag) => (
-                      <span
-                        key={tag}
-                        className="bg-surface text-muted rounded px-1.5 py-0.5 text-xs"
-                      >
-                        {TAGS[tag as Tag] ?? tag}
-                      </span>
-                    ))}
-                  </div>
-                </td>
-                <td className="px-4 py-3 text-right">
-                  <DifficultyBadge difficulty={problem.difficulty} />
-                </td>
-              </tr>
-            ))}
-            {visible.length === 0 && (
-              <tr>
-                <td colSpan={4} className="text-muted px-4 py-12 text-center">
-                  No problems match these filters.
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+          ))}
+          {problems.length === 0 && (
+            <tr>
+              <td colSpan={4} className="text-muted px-4 py-12 text-center">
+                No problems match these filters.
+              </td>
+            </tr>
+          )}
+        </tbody>
+      </table>
     </div>
   );
 }

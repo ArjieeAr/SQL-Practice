@@ -5,10 +5,11 @@ import type { editor as MonacoEditor, IDisposable, Position } from "monaco-edito
 import { useEffect, useRef } from "react";
 
 import type { SampleTable } from "@/lib/problems/preview";
+import { useTheme } from "@/lib/use-theme";
 
 type Monaco = Parameters<BeforeMount>[0];
 
-const THEME = "sql-practice-dark";
+const THEMES = { dark: "sql-practice-dark", light: "sql-practice-light" } as const;
 const MARKER_OWNER = "sql-practice";
 
 const KEYWORDS = [
@@ -117,12 +118,21 @@ export default function SqlEditor({ value, onChange, onRun, tables, error }: Sql
 
   useEffect(() => () => disposables.current.forEach((d) => d.dispose()), []);
 
+  const theme = useTheme();
+
+  // Editor colours match the app's --surface / --surface-raised tokens in globals.css.
   const beforeMount: BeforeMount = (monaco) => {
-    monaco.editor.defineTheme(THEME, {
+    monaco.editor.defineTheme(THEMES.dark, {
       base: "vs-dark",
       inherit: true,
       rules: [],
       colors: { "editor.background": "#14181e", "editor.lineHighlightBackground": "#1b2027" },
+    });
+    monaco.editor.defineTheme(THEMES.light, {
+      base: "vs",
+      inherit: true,
+      rules: [],
+      colors: { "editor.background": "#f6f7f9", "editor.lineHighlightBackground": "#eceef2" },
     });
   };
 
@@ -217,7 +227,7 @@ export default function SqlEditor({ value, onChange, onRun, tables, error }: Sql
   return (
     <Editor
       language="sql"
-      theme={THEME}
+      theme={THEMES[theme]}
       value={value}
       onChange={(next) => onChange(next ?? "")}
       beforeMount={beforeMount}

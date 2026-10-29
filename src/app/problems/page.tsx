@@ -1,8 +1,7 @@
 import type { Metadata } from "next";
-import { Suspense } from "react";
 
 import { ProblemBrowser } from "@/components/problems/problem-browser";
-import { getProblemSummaries, type ProblemSummary } from "@/lib/data/problems";
+import { getProblemSummaries } from "@/lib/data/problems";
 import { getMyProblemStatuses } from "@/lib/data/progress";
 
 export const metadata: Metadata = {
@@ -12,6 +11,9 @@ export const metadata: Metadata = {
 export default async function ProblemsPage() {
   // Cached and identical for everyone, so the full list ships in the prerendered HTML.
   const problems = await getProblemSummaries();
+  // Not awaited: the visitor's solved/attempted marks depend on their cookies, so the promise
+  // streams to the browser and only the parts that need it wait (see ProblemBrowser).
+  const statusesPromise = getMyProblemStatuses();
 
   return (
     <section className="mx-auto flex w-full max-w-5xl flex-col gap-6 px-4 py-10">
@@ -21,17 +23,7 @@ export default async function ProblemsPage() {
           {problems.length} problems on JOINs, aggregation, window functions, CTEs and more.
         </p>
       </header>
-
-      {/* Solved/attempted marks depend on the visitor's cookies, so they stream in afterwards.
-          Until then (and in the static shell) the same list renders without them. */}
-      <Suspense fallback={<ProblemBrowser problems={problems} statuses={null} />}>
-        <ProblemBrowserWithProgress problems={problems} />
-      </Suspense>
+      <ProblemBrowser problems={problems} statusesPromise={statusesPromise} />
     </section>
   );
-}
-
-async function ProblemBrowserWithProgress({ problems }: { problems: ProblemSummary[] }) {
-  const statuses = await getMyProblemStatuses();
-  return <ProblemBrowser problems={problems} statuses={statuses} />;
 }

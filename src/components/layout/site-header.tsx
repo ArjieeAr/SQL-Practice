@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { Suspense } from "react";
 
+import { ThemeToggle } from "./theme-toggle";
 import { UserMenu } from "./user-menu";
 
 export function SiteHeader() {
@@ -15,7 +16,8 @@ export function SiteHeader() {
             Problems
           </Link>
         </nav>
-        <div className="ml-auto">
+        <div className="ml-auto flex items-center gap-3">
+          <ThemeToggle />
           {/* The header is part of every page's static shell; only the user menu waits on the
               session. A neutral placeholder avoids flashing "Sign in" at signed-in users. */}
           <Suspense fallback={<div className="h-8 w-20" aria-hidden />}>
