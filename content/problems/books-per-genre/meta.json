@@ -1,0 +1,7 @@
+{
+  "number": 2,
+  "title": "Shelf Count",
+  "difficulty": "easy",
+  "tags": ["group-by", "null-handling"],
+  "orderMatters": false
+}

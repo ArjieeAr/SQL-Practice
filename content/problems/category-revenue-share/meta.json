@@ -1,0 +1,7 @@
+{
+  "number": 10,
+  "title": "Revenue Share by Category",
+  "difficulty": "medium",
+  "tags": ["ctes", "window-functions", "group-by"],
+  "orderMatters": false
+}

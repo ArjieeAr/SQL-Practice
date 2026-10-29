@@ -1,0 +1,7 @@
+{
+  "number": 5,
+  "title": "Duplicate Sign-ups",
+  "difficulty": "easy",
+  "tags": ["group-by"],
+  "orderMatters": false
+}

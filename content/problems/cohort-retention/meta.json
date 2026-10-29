@@ -1,0 +1,7 @@
+{
+  "number": 17,
+  "title": "Second-Month Retention",
+  "difficulty": "hard",
+  "tags": ["ctes", "dates", "group-by"],
+  "orderMatters": true
+}

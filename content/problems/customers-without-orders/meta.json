@@ -1,0 +1,7 @@
+{
+  "number": 1,
+  "title": "Silent Shoppers",
+  "difficulty": "easy",
+  "tags": ["joins", "subqueries", "null-handling"],
+  "orderMatters": false
+}

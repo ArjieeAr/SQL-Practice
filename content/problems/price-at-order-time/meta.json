@@ -1,0 +1,7 @@
+{
+  "number": 13,
+  "title": "Price at Time of Order",
+  "difficulty": "medium",
+  "tags": ["subqueries", "joins", "dates"],
+  "orderMatters": false
+}

@@ -1,0 +1,7 @@
+{
+  "number": 4,
+  "title": "Crowd Favorites",
+  "difficulty": "easy",
+  "tags": ["joins", "group-by"],
+  "orderMatters": false
+}

@@ -1,0 +1,71 @@
+{
+  "name": "sql-practice",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "eslint",
+    "typecheck": "next typegen && tsc --noEmit",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "playwright test",
+    "db:types": "supabase gen types typescript --linked --schema public > src/types/database.ts",
+    "db:push": "supabase db push",
+    "db:link": "supabase link",
+    "seed": "tsx --env-file=.env.local scripts/seed.mts",
+    "seed:check": "tsx scripts/seed.mts --dry-run",
+    "e2e:user": "tsx --env-file=.env.local scripts/create-e2e-user.mts",
+    "screenshots": "tsx scripts/screenshots.mts"
+  },
+  "dependencies": {
+    "@electric-sql/pglite": "^0.5.13",
+    "@monaco-editor/react": "^4.7.0",
+    "@supabase/ssr": "^0.12.7",
+    "@supabase/supabase-js": "^2.118.0",
+    "lucide-react": "^1.64.0",
+    "next": "16.4.3",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-markdown": "^10.1.0",
+    "remark-gfm": "^4.0.1",
+    "server-only": "^0.0.1",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.64.1",
+    "@tailwindcss/turbopack": "^4",
+    "@tailwindcss/typography": "^0.5.20",
+    "@types/node": "^22.20.5",
+    "@types/react": "^19",
+    "@types/react-dom": "^19",
+    "eslint": "^9",
+    "eslint-config-next": "16.4.3",
+    "eslint-config-prettier": "^10.1.8",
+    "prettier": "^3.9.10",
+    "prettier-plugin-tailwindcss": "^0.8.1",
+    "supabase": "^2.122.0",
+    "tailwindcss": "^4",
+    "tsx": "^4.23.15",
+    "typescript": "^5",
+    "vitest": "^5.0.5"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "overrides": {
+    "dompurify": "3.4.17"
+  },
+  "description": "SQL interview practice: queries run in a browser Postgres sandbox (PGlite) and are graded server-side against hidden test cases.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ArjieeAr/SQL-Practice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ArjieeAr/SQL-Practice/issues"
+  },
+  "homepage": "https://github.com/ArjieeAr/SQL-Practice#readme"
+}

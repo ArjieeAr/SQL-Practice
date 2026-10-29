@@ -1,0 +1,7 @@
+{
+  "number": 8,
+  "title": "Monthly Revenue Report",
+  "difficulty": "medium",
+  "tags": ["dates", "group-by", "joins"],
+  "orderMatters": true
+}
