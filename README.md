@@ -6,9 +6,11 @@ graded against hidden test cases** full of NULLs, ties, empty tables and boundar
 
 ![Problem page: the editor, a successful Run, and the schema viewer](docs/screenshots/problem-run.png)
 
-| Problem list                                   | Sample data viewer                                   |
-| ---------------------------------------------- | ---------------------------------------------------- |
-| ![Problem list](docs/screenshots/problems.png) | ![Sample data tab](docs/screenshots/sample-data.png) |
+| Submitted and graded on hidden test cases               | Profile: progress and streak                         |
+| ------------------------------------------------------- | ---------------------------------------------------- |
+| ![Accepted submission](docs/screenshots/submission.png) | ![Profile page](docs/screenshots/profile.png)        |
+| **Problem list**                                        | **Sample data viewer**                               |
+| ![Problem list](docs/screenshots/problems.png)          | ![Sample data tab](docs/screenshots/sample-data.png) |
 
 ## Features
 
