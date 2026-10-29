@@ -1,4 +1,5 @@
 import { LogOut } from "lucide-react";
+import Link from "next/link";
 
 import { signOut } from "@/app/login/actions";
 import { createClient } from "@/lib/supabase/server";
@@ -20,7 +21,11 @@ export async function UserMenu() {
 
   return (
     <div className="flex items-center gap-3">
-      <span className="flex items-center gap-2 text-sm">
+      <Link
+        href="/profile"
+        title="Your profile"
+        className="hover:text-accent flex items-center gap-2 text-sm transition-colors"
+      >
         <span
           aria-hidden
           className="bg-accent/20 text-accent flex size-7 items-center justify-center rounded-full text-xs font-semibold uppercase"
@@ -28,7 +33,8 @@ export async function UserMenu() {
           {name.slice(0, 1)}
         </span>
         <span className="hidden max-w-40 truncate sm:inline">{name}</span>
-      </span>
+        <span className="sr-only sm:hidden">Your profile</span>
+      </Link>
       <form action={signOut}>
         <button
           type="submit"
