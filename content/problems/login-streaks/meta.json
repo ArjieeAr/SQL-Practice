@@ -1,0 +1,7 @@
+{
+  "number": 15,
+  "title": "Longest Login Streak",
+  "difficulty": "hard",
+  "tags": ["window-functions", "ctes", "dates"],
+  "orderMatters": false
+}

@@ -1,0 +1,6 @@
+-- "At least 4.0" means >=, not >
+SELECT m.title, ROUND(AVG(r.stars), 2) AS avg_rating
+FROM movies m
+JOIN ratings r ON r.movie_id = m.id
+GROUP BY m.id, m.title
+HAVING COUNT(*) >= 3 AND AVG(r.stars) > 4;

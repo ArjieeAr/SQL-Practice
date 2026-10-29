@@ -1,0 +1,7 @@
+{
+  "number": 11,
+  "title": "Double-Booked Rooms",
+  "difficulty": "medium",
+  "tags": ["joins", "dates"],
+  "orderMatters": false
+}

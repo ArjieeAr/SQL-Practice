@@ -47,6 +47,7 @@ export type Database = {
           number: number
           order_matters: boolean
           sample_data_sql: string
+          sample_expected: Json | null
           schema_sql: string
           slug: string
           starter_sql: string
@@ -63,6 +64,7 @@ export type Database = {
           number: number
           order_matters?: boolean
           sample_data_sql: string
+          sample_expected?: Json | null
           schema_sql: string
           slug: string
           starter_sql?: string
@@ -79,6 +81,7 @@ export type Database = {
           number?: number
           order_matters?: boolean
           sample_data_sql?: string
+          sample_expected?: Json | null
           schema_sql?: string
           slug?: string
           starter_sql?: string

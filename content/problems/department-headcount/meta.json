@@ -1,0 +1,7 @@
+{
+  "number": 6,
+  "title": "Department Headcount",
+  "difficulty": "easy",
+  "tags": ["joins", "group-by"],
+  "orderMatters": false
+}

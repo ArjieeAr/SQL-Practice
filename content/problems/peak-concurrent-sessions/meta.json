@@ -1,0 +1,7 @@
+{
+  "number": 18,
+  "title": "Peak Concurrent Sessions",
+  "difficulty": "hard",
+  "tags": ["window-functions", "ctes", "dates"],
+  "orderMatters": false
+}

@@ -1,0 +1,7 @@
+{
+  "number": 12,
+  "title": "Best Sellers per Category",
+  "difficulty": "medium",
+  "tags": ["window-functions", "ctes", "joins"],
+  "orderMatters": false
+}
