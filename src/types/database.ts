@@ -48,6 +48,7 @@ export type Database = {
           order_matters: boolean
           sample_data_sql: string
           sample_expected: Json | null
+          sample_tables: Json | null
           schema_sql: string
           slug: string
           starter_sql: string
@@ -65,6 +66,7 @@ export type Database = {
           order_matters?: boolean
           sample_data_sql: string
           sample_expected?: Json | null
+          sample_tables?: Json | null
           schema_sql: string
           slug: string
           starter_sql?: string
@@ -82,6 +84,7 @@ export type Database = {
           order_matters?: boolean
           sample_data_sql?: string
           sample_expected?: Json | null
+          sample_tables?: Json | null
           schema_sql?: string
           slug?: string
           starter_sql?: string

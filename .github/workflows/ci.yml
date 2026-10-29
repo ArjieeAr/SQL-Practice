@@ -29,6 +29,11 @@ jobs:
     name: Playwright e2e
     runs-on: ubuntu-latest
     needs: check
+    # `next build` prerenders the problem pages, so it reads problems from Supabase.
+    # Both values are public (they ship to every browser); RLS is what protects the data.
+    env:
+      NEXT_PUBLIC_SUPABASE_URL: ${{ secrets.NEXT_PUBLIC_SUPABASE_URL }}
+      NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY: ${{ secrets.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY }}
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-node@v5

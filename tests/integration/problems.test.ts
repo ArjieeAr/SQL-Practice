@@ -61,6 +61,14 @@ describe.each(problems)("$number. $title", (problem) => {
     expect(verification.sampleExpected.rows.length).toBeGreaterThan(0);
   });
 
+  it("describes every sample table for the schema viewer", () => {
+    expect(verification.sampleTables.length).toBeGreaterThan(0);
+    for (const table of verification.sampleTables) {
+      expect(table.columns.length).toBeGreaterThan(0);
+      expect(table.rows.columns.map((c) => c.name)).toEqual(table.columns.map((c) => c.name));
+    }
+  });
+
   it("runs the reference on every hidden case", () => {
     expect(verification.cases.map((c) => c.name)).toEqual(problem.cases.map((c) => c.name));
   });

@@ -8,10 +8,14 @@ import { LIMITS } from "@/lib/sql/limits";
 import type { RawResult } from "@/lib/sql/types";
 
 import type { ProblemDefinition } from "./content";
+import { introspectTables } from "./introspect";
+import type { SampleTable } from "./preview";
 
 export interface ProblemVerification {
   /** The reference result on the public sample data, shown to users as "expected output". */
   sampleExpected: RawResult;
+  /** The sample tables (columns + rows), for the problem's schema viewer. */
+  sampleTables: SampleTable[];
   cases: { name: string; expected: RawResult }[];
   /** For each known-wrong query, the first hidden case that rejects it (null: none do). */
   pitfalls: { name: string; caughtBy: string | null }[];
@@ -25,6 +29,7 @@ async function runDataset(
   dataSql: string,
   label: string,
   snapshot: SharedArrayBuffer | undefined,
+  { withTables = false } = {},
 ) {
   let db;
   try {
@@ -56,7 +61,8 @@ async function runDataset(
         pitfallOutcomes.push({ error: err.message });
       }
     }
-    return { expected, pitfallOutcomes };
+    const tables = withTables ? await introspectTables(db) : [];
+    return { expected, pitfallOutcomes, tables };
   } finally {
     await db.close();
   }
@@ -67,7 +73,9 @@ export async function verifyProblem(
   snapshot?: SharedArrayBuffer,
 ): Promise<ProblemVerification> {
   // Sequential on purpose: PGlite is single-threaded, so parallel instances only add memory.
-  const sample = await runDataset(problem, problem.sampleDataSql, "sample data", snapshot);
+  const sample = await runDataset(problem, problem.sampleDataSql, "sample data", snapshot, {
+    withTables: true,
+  });
 
   // A pitfall should be a plausible wrong answer, not broken SQL: it must at least run.
   sample.pitfallOutcomes.forEach((outcome, i) => {
@@ -91,6 +99,7 @@ export async function verifyProblem(
 
   return {
     sampleExpected: sample.expected,
+    sampleTables: sample.tables,
     cases,
     pitfalls: problem.pitfalls.map((p, i) => ({ name: p.name, caughtBy: caughtBy[i] })),
   };

@@ -74,6 +74,7 @@ const { data: rows, error: problemsError } = await supabase
       sample_data_sql: problem.sampleDataSql,
       // RawResult is plain JSON data; the cast only bridges interface vs. index-signature types.
       sample_expected: verification.sampleExpected as unknown as Json,
+      sample_tables: verification.sampleTables as unknown as Json,
       order_matters: problem.orderMatters,
       is_published: problem.published,
     })),
