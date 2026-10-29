@@ -66,8 +66,31 @@ export async function signUp(_prev: AuthFormState, formData: FormData): Promise<
   return { message: "Check your email for a confirmation link to finish signing up." };
 }
 
+/**
+ * Whether the GitHub provider is switched on in Supabase. signInWithOAuth can't tell us: it
+ * builds the authorize URL locally, so a disabled provider only fails after the redirect, on
+ * Supabase's raw JSON error page. The public settings endpoint lets us fail politely instead.
+ */
+async function isGitHubEnabled(): Promise<boolean> {
+  try {
+    const res = await fetch(`${publicEnv.NEXT_PUBLIC_SUPABASE_URL}/auth/v1/settings`, {
+      headers: { apikey: publicEnv.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY },
+    });
+    if (!res.ok) return true; // don't block sign-in because the check itself failed
+    const settings = (await res.json()) as { external?: { github?: boolean } };
+    return settings.external?.github === true;
+  } catch {
+    return true;
+  }
+}
+
 export async function signInWithGitHub(formData: FormData) {
   const next = String(formData.get("next") ?? "");
+  if (!(await isGitHubEnabled())) {
+    const message = "GitHub sign-in isn't available right now. Please use email instead.";
+    redirect(`/login?next=${encodeURIComponent(next)}&error=${encodeURIComponent(message)}`);
+  }
+
   const supabase = await createClient();
   const { data, error } = await supabase.auth.signInWithOAuth({
     provider: "github",
