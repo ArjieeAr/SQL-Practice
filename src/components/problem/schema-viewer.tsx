@@ -35,12 +35,15 @@ export function SchemaColumns({ tables }: { tables: SampleTable[] }) {
                   )}
                 </span>
                 {column.references && (
-                  <span className="text-muted inline-flex items-center gap-1" title="foreign key">
-                    <Link2 className="size-3" aria-hidden />
-                    {column.references}
+                  <span
+                    className="text-muted inline-flex min-w-0 items-center gap-1"
+                    title={`foreign key → ${column.references}`}
+                  >
+                    <Link2 className="size-3 shrink-0" aria-hidden />
+                    <span className="truncate">{column.references}</span>
                   </span>
                 )}
-                <span className="text-accent">
+                <span className="text-accent shrink-0 whitespace-nowrap">
                   {shortType(column.type)}
                   {!column.notNull && !column.primaryKey && (
                     <span className="text-muted"> null</span>
