@@ -12,8 +12,17 @@ export interface PanelTab {
  * Accessible tabs whose panels can be Server Components passed in as props. Inactive panels stay
  * mounted (just hidden) so switching tabs keeps scroll position and state.
  */
-export function PanelTabs({ tabs, label }: { tabs: PanelTab[]; label: string }) {
-  const [active, setActive] = useState(tabs[0]?.id);
+export function PanelTabs({
+  tabs,
+  label,
+  initialId,
+}: {
+  tabs: PanelTab[];
+  label: string;
+  /** Tab to show first. Remount with a new `key` to switch tabs programmatically. */
+  initialId?: string;
+}) {
+  const [active, setActive] = useState(initialId ?? tabs[0]?.id);
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">

@@ -6,8 +6,10 @@ import { Suspense } from "react";
 
 import { Markdown } from "@/components/problem/markdown";
 import { PanelTabs } from "@/components/problem/panel-tabs";
+import { ProblemSession } from "@/components/problem/problem-session";
 import { ProblemWorkspace } from "@/components/problem/problem-workspace";
 import { SampleData, SchemaColumns, SqlBlock } from "@/components/problem/schema-viewer";
+import { SubmissionHistory } from "@/components/problem/submission-history";
 import { DifficultyBadge } from "@/components/problems/difficulty-badge";
 import { getProblem, getProblemSummaries } from "@/lib/data/problems";
 import { TAGS, type Tag } from "@/lib/problems/tags";
@@ -43,69 +45,75 @@ async function ProblemView({ params }: Pick<PageProps<"/problems/[slug]">, "para
   const tables = problem.sampleTables;
 
   return (
-    <div className="flex flex-1 flex-col lg:grid lg:h-[calc(100dvh-3.5rem)] lg:grid-cols-2">
-      <div className="border-border flex min-h-0 flex-col lg:border-r">
-        <header className="border-border flex flex-col gap-2 border-b px-4 py-3">
-          <Link
-            href="/problems"
-            className="text-muted hover:text-foreground inline-flex w-fit items-center gap-1 text-xs"
-          >
-            <ArrowLeft className="size-3" /> All problems
-          </Link>
-          <h1 className="text-lg font-semibold">
-            {problem.number}. {problem.title}
-          </h1>
-          <div className="flex flex-wrap items-center gap-2">
-            <DifficultyBadge difficulty={problem.difficulty} />
-            {problem.tags.map((tag) => (
-              <span key={tag} className="bg-surface text-muted rounded px-1.5 py-0.5 text-xs">
-                {TAGS[tag as Tag] ?? tag}
-              </span>
-            ))}
-          </div>
-        </header>
-        <PanelTabs
-          label="Problem"
-          tabs={[
-            {
-              id: "description",
-              label: "Description",
-              content: (
-                <div className="flex flex-col gap-6">
-                  <Markdown>{problem.descriptionMd}</Markdown>
-                  <section className="flex flex-col gap-2">
-                    <h2 className="text-sm font-semibold">Tables</h2>
-                    {tables ? (
-                      <SchemaColumns tables={tables} />
-                    ) : (
-                      <SqlBlock sql={problem.schemaSql} />
-                    )}
-                  </section>
-                </div>
-              ),
-            },
-            {
-              id: "data",
-              label: "Sample data",
-              content: tables ? (
-                <SampleData tables={tables} />
-              ) : (
-                <SqlBlock sql={problem.sampleDataSql} />
-              ),
-            },
-          ]}
+    <ProblemSession key={problem.slug}>
+      <div className="flex flex-1 flex-col lg:grid lg:h-[calc(100dvh-3.5rem)] lg:grid-cols-2">
+        <div className="border-border flex min-h-0 flex-col lg:border-r">
+          <header className="border-border flex flex-col gap-2 border-b px-4 py-3">
+            <Link
+              href="/problems"
+              className="text-muted hover:text-foreground inline-flex w-fit items-center gap-1 text-xs"
+            >
+              <ArrowLeft className="size-3" /> All problems
+            </Link>
+            <h1 className="text-lg font-semibold">
+              {problem.number}. {problem.title}
+            </h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <DifficultyBadge difficulty={problem.difficulty} />
+              {problem.tags.map((tag) => (
+                <span key={tag} className="bg-surface text-muted rounded px-1.5 py-0.5 text-xs">
+                  {TAGS[tag as Tag] ?? tag}
+                </span>
+              ))}
+            </div>
+          </header>
+          <PanelTabs
+            label="Problem"
+            tabs={[
+              {
+                id: "description",
+                label: "Description",
+                content: (
+                  <div className="flex flex-col gap-6">
+                    <Markdown>{problem.descriptionMd}</Markdown>
+                    <section className="flex flex-col gap-2">
+                      <h2 className="text-sm font-semibold">Tables</h2>
+                      {tables ? (
+                        <SchemaColumns tables={tables} />
+                      ) : (
+                        <SqlBlock sql={problem.schemaSql} />
+                      )}
+                    </section>
+                  </div>
+                ),
+              },
+              {
+                id: "data",
+                label: "Sample data",
+                content: tables ? (
+                  <SampleData tables={tables} />
+                ) : (
+                  <SqlBlock sql={problem.sampleDataSql} />
+                ),
+              },
+              {
+                id: "submissions",
+                label: "Submissions",
+                content: <SubmissionHistory slug={problem.slug} />,
+              },
+            ]}
+          />
+        </div>
+
+        <ProblemWorkspace
+          slug={problem.slug}
+          setupSql={`${problem.schemaSql}\n${problem.sampleDataSql}`}
+          orderMatters={problem.orderMatters}
+          sampleExpected={problem.sampleExpected}
+          tables={tables ?? []}
         />
       </div>
-
-      <ProblemWorkspace
-        key={problem.slug}
-        slug={problem.slug}
-        setupSql={`${problem.schemaSql}\n${problem.sampleDataSql}`}
-        orderMatters={problem.orderMatters}
-        sampleExpected={problem.sampleExpected}
-        tables={tables ?? []}
-      />
-    </div>
+    </ProblemSession>
   );
 }
 

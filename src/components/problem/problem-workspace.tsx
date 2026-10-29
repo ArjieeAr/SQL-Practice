@@ -2,13 +2,16 @@
 
 import { Loader2, Play, Send } from "lucide-react";
 import dynamic from "next/dynamic";
+import Link from "next/link";
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import type { SampleTable } from "@/lib/problems/preview";
 import type { RunOutcome, SandboxStatus } from "@/lib/sandbox/browser-sandbox";
 import type { RawResult } from "@/lib/sql/types";
+import type { SubmitResponse } from "@/lib/submissions/types";
 
-import { ResultsPanel } from "./results-panel";
+import { useProblemSession } from "./problem-session";
+import { ResultsPanel, type LastSubmission } from "./results-panel";
 import { useSandbox } from "./use-sandbox";
 
 // Monaco touches `window` and is large; load it only in the browser.
@@ -60,6 +63,17 @@ export function ProblemWorkspace({
   const [outcome, setOutcome] = useState<RunOutcome | null>(null);
   const [ranSql, setRanSql] = useState("");
   const [running, setRunning] = useState(false);
+  const [submission, setSubmission] = useState<LastSubmission | null>(null);
+  const [submitting, setSubmitting] = useState(false);
+  const [focus, setFocus] = useState<"output" | "submission">("output");
+  const [resultVersion, setResultVersion] = useState(0);
+  const { user, notifySubmitted, registerEditor } = useProblemSession();
+
+  // Let the submission history load a past query into this editor.
+  useEffect(() => {
+    registerEditor(setSql);
+    return () => registerEditor(null);
+  }, [registerEditor]);
 
   // Save drafts shortly after the user stops typing.
   useEffect(() => {
@@ -79,10 +93,42 @@ export function ProblemWorkspace({
     setRunning(true);
     setRanSql(query);
     setOutcome(await run(query));
+    setFocus("output");
+    setResultVersion((v) => v + 1);
     setRunning(false);
   }, [run, running]);
 
-  const editorError = outcome?.type === "error" ? outcome : null;
+  const handleSubmit = async () => {
+    const query = sqlRef.current;
+    if (submitting) return;
+    setSubmitting(true);
+    let response: SubmitResponse;
+    try {
+      const res = await fetch("/api/submit", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ slug, query }),
+      });
+      response = (await res.json()) as SubmitResponse;
+    } catch {
+      response = { ok: false, error: "Could not reach the server. Check your connection." };
+    }
+    setSubmission({ response, query });
+    setFocus("submission");
+    setResultVersion((v) => v + 1);
+    setSubmitting(false);
+    if (response.ok) notifySubmitted();
+  };
+
+  // Underline the error from whichever action the user just took.
+  const editorError =
+    focus === "submission"
+      ? submission?.response.ok && submission.response.error
+        ? submission.response.error
+        : null
+      : outcome?.type === "error"
+        ? outcome
+        : null;
 
   return (
     <div className="flex min-h-0 flex-1 flex-col">
@@ -99,15 +145,29 @@ export function ProblemWorkspace({
             {running ? <Loader2 className="size-4 animate-spin" /> : <Play className="size-4" />}
             Run
           </button>
-          <button
-            type="button"
-            disabled
-            title="Sign in to submit your solution"
-            className="bg-accent text-accent-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium disabled:opacity-50"
-          >
-            <Send className="size-4" />
-            Submit
-          </button>
+          {user === null ? (
+            <Link
+              href={`/login?next=${encodeURIComponent(`/problems/${slug}`)}`}
+              className="bg-accent text-accent-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-opacity hover:opacity-90"
+            >
+              Sign in to submit
+            </Link>
+          ) : (
+            <button
+              type="button"
+              onClick={handleSubmit}
+              disabled={user === undefined || submitting}
+              title="Grade against the hidden test cases"
+              className="bg-accent text-accent-foreground inline-flex h-8 items-center gap-1.5 rounded-md px-3 text-sm font-medium transition-opacity hover:opacity-90 disabled:opacity-60"
+            >
+              {submitting ? (
+                <Loader2 className="size-4 animate-spin" />
+              ) : (
+                <Send className="size-4" />
+              )}
+              {submitting ? "Grading…" : "Submit"}
+            </button>
+          )}
         </div>
       </div>
 
@@ -123,8 +183,12 @@ export function ProblemWorkspace({
 
       <div className="border-border flex min-h-64 flex-col border-t lg:min-h-0 lg:flex-[2]">
         <ResultsPanel
+          slug={slug}
           outcome={outcome}
           ranSql={ranSql}
+          submission={submission}
+          focus={focus}
+          resultVersion={resultVersion}
           sampleExpected={sampleExpected}
           orderMatters={orderMatters}
         />
