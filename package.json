@@ -58,5 +58,14 @@
   },
   "overrides": {
     "dompurify": "3.4.17"
-  }
+  },
+  "description": "SQL interview practice: queries run in a browser Postgres sandbox (PGlite) and are graded server-side against hidden test cases.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ArjieeAr/SQL-Practice.git"
+  },
+  "bugs": {
+    "url": "https://github.com/ArjieeAr/SQL-Practice/issues"
+  },
+  "homepage": "https://github.com/ArjieeAr/SQL-Practice#readme"
 }

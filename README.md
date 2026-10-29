@@ -1,5 +1,7 @@
 # SQL Practice
 
+[![CI](https://github.com/ArjieeAr/SQL-Practice/actions/workflows/ci.yml/badge.svg)](https://github.com/ArjieeAr/SQL-Practice/actions/workflows/ci.yml)
+
 A LeetCode-style practice platform focused only on SQL. Read a problem, write a query in the
 editor, **run it against a real Postgres that runs in your browser**, then **submit it to be
 graded against hidden test cases** full of NULLs, ties, empty tables and boundary dates.
@@ -229,9 +231,11 @@ tests/unit|integration|e2e
 **Prerequisites:** Node.js 22+, and a free [Supabase](https://supabase.com) project. Docker isn't
 needed.
 
-1. **Install dependencies and configure the environment.**
+1. **Clone, install dependencies, and configure the environment.**
 
    ```bash
+   git clone https://github.com/ArjieeAr/SQL-Practice.git
+   cd SQL-Practice
    npm install
    cp .env.example .env.local
    ```
