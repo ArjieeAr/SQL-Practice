@@ -27,6 +27,10 @@ graded against hidden test cases** full of NULLs, ties, empty tables and boundar
   at the exact position Postgres reports, and per-problem drafts.
 - **Accounts** via email or GitHub (Supabase Auth). Anyone can browse and Run; signing in
   unlocks Submit, submission history, and a profile with solved counts and a daily streak.
+- **Community proposals.** Signed-in users can suggest a problem. Admins review the queue, then
+  complete and publish it, or reject it with a note.
+- **Admin editor.** Write or edit a problem on the site. Publishing checks it in the sandbox first,
+  so a broken problem can't go live.
 - Dark by default, with a light theme; responsive down to phone width.
 
 **Stack:** Next.js 16 (App Router, Cache Components) · TypeScript · Tailwind CSS v4 ·
@@ -157,15 +161,30 @@ The comparison lives in [`src/lib/sql/compare.ts`](src/lib/sql/compare.ts), with
 
 | Table                 | Contents                                               | Client access (RLS)          |
 | --------------------- | ------------------------------------------------------ | ---------------------------- |
-| `profiles`            | display name, avatar; created by a trigger on sign-up  | read and update **own**      |
+| `profiles`            | display name, avatar, role; created on sign-up         | read **own**; update name    |
 | `problems`            | description, schema, sample data, derived previews     | read **published**           |
-| `problem_solutions`   | reference SQL                                          | **none** (service role only) |
+| `problem_solutions`   | reference SQL, known-wrong queries                     | **none** (service role only) |
 | `test_cases`          | hidden test data                                       | **none** (service role only) |
 | `submissions`         | query, verdict, runtime, case counts                   | read **own**; no writes      |
 | `user_problem_status` | attempts and first solve time; maintained by a trigger | read **own**; no writes      |
+| `problem_proposals`   | users' suggestions and their review outcome            | read **own**; no writes      |
 
 - **Clients can't write submissions at all.** Only the grader inserts them, using the service role.
   Otherwise anyone could `POST {status: "accepted"}` straight to Supabase.
+- **Users can't promote themselves.** `profiles.role` isn't in the column grant, so only the service
+  role can change it. The app reads the role from the database on each request, not from the JWT,
+  so revoking it takes effect immediately.
+- **Admin checks live in the app, and clients still have no write access to problems.** Otherwise a
+  direct call to Supabase could publish a problem that skipped the sandbox. Every admin read and
+  write checks the caller itself, so a page that forgets its own check can't leak anything.
+- **Saves are one transaction.** The `save_problem()` function writes a problem, its solution and
+  its test cases together, and only the service role can call it, so a failed edit can't leave a
+  live problem with no test cases.
+- **Proposals are untrusted input.** Their SQL is shown as text and only ever runs in a killable
+  worker when an admin clicks Verify. Remote images are dropped while reviewing, so opening a
+  proposal can't reveal an admin's IP address.
+- **Problems can't be deleted, only unpublished**, because submissions cascade from problems and
+  deleting one would wipe users' history.
 - **Reference solutions get their own table.** RLS filters rows, not columns, so a separate table
   with no client policies is simpler and safer than column grants.
 - **RLS plus explicit `REVOKE`s.** Supabase grants clients broad table privileges by default; the
@@ -179,9 +198,41 @@ stand-in ([`tests/support/supabase-stub.sql`](tests/support/supabase-stub.sql)):
 [`tests/integration/database.test.ts`](tests/integration/database.test.ts) then acts as signed-out,
 Alice and Bob. Removing a `REVOKE` or loosening a policy makes it fail.
 
-## Problems as code
+## Managing problems
 
-Each problem is a folder in [`content/problems`](content/problems):
+**The database owns problems.** Admins add and edit them on the site at `/admin`:
+
+1. A signed-in user proposes a problem at `/proposals/new`. Only a title, difficulty and description
+   are required. It's limited to 5 proposals per user per day.
+2. An admin opens the queue at `/admin/proposals`, and either rejects the proposal with a note or
+   starts a problem from it. Admins can also start from scratch with **New problem**.
+3. **Verify** runs the problem through the sandbox and shows the expected output on every dataset.
+4. **Publish** verifies again on the server, stores the computed previews, and makes the problem
+   live right away. It also marks the proposal as approved, which the proposer sees at `/proposals`.
+
+A problem can't be published unless:
+
+- it has a description, schema, sample data, at least one tag, and 2 to 5 hidden test cases
+- the reference solution is a read query that runs on every dataset and returns rows on the sample
+  data, and sorts its output if row order matters
+- every pitfall runs on the sample data and is rejected by at least one hidden test case
+
+Slugs and problem numbers never change once a problem exists. Editing a published problem changes
+how new submissions are graded; past submissions and solved status stay as they are.
+
+**Making someone an admin.** They need to sign up first. Roles can't be changed from the site:
+
+```bash
+npm run admin:grant -- someone@example.com
+npm run admin:grant -- someone@example.com --revoke
+```
+
+### The starter set
+
+[`content/problems`](content/problems) holds the original 18 problems. `npm run seed` imports any
+that aren't in the database yet, so a new environment starts with something to solve. It never
+overwrites or unpublishes anything, so **these files stop matching production once admins edit a
+problem**. To change a live problem, use the editor. Each problem is a folder:
 
 ```
 meta.json        number, title, difficulty, tags, orderMatters
@@ -205,24 +256,29 @@ mistakes:
 - filtering a `LEFT JOIN`ed table in `WHERE`
 - `ORDER BY` without a tiebreak inside a window
 
-So the edge-case coverage is tested, not just claimed. `npm run seed` runs the same verification
-and writes nothing unless every problem passes.
+So the edge-case coverage is tested, not just claimed. `npm run seed` and the admin editor run the
+same verification, and `npm run seed` writes nothing unless every problem passes. CI only covers
+these files. Live problems are checked when they're published.
 
 ## Project structure
 
 ```
-src/app/                 routes: /, /problems, /problems/[slug], /login, /profile,
-                         /auth/callback, /api/submit
-src/components/          UI, grouped by feature (problem, problems, profile, auth, layout)
+src/app/                 routes: /, /problems, /problems/[slug], /login, /profile, /proposals,
+                         /admin, /auth/callback, /api/submit, /api/admin/problems
+src/components/          UI, grouped by feature (problem, problems, profile, auth, layout,
+                         authoring, proposals, admin)
 src/lib/sql/             result normalization, comparison, query guard, limits (pure, tested)
 src/lib/sandbox/         engine.mjs, browser + server workers, snapshot boot
 src/lib/grader/          gradeSubmission(): verdict from per-case runs
-src/lib/data/            server-side data access (cached public reads, RLS-scoped user reads)
+src/lib/problems/        authoring rules, sandbox verification, the starter set loader
+src/lib/auth/            redirect sanitizing, account roles
+src/lib/data/            server-side data access (cached public reads, RLS-scoped user reads,
+                         admin reads)
 src/lib/supabase/        server / browser / public / admin clients
 src/proxy.ts             refreshes the Supabase session before rendering
-content/problems/        the 18 problems (see above)
-supabase/migrations/     schema, RLS, triggers, stats function
-scripts/                 seed, e2e test user, README screenshots
+content/problems/        the starter set of 18 problems (see above)
+supabase/migrations/     schema, RLS, triggers, stats and save functions
+scripts/                 seed, admin roles, e2e test user, README screenshots
 tests/unit|integration|e2e
 ```
 
@@ -249,7 +305,7 @@ needed.
    npx supabase login
    npm run db:link -- --project-ref <your-project-ref>
    npm run db:push      # apply supabase/migrations
-   npm run seed         # verify and upload content/problems
+   npm run seed         # verify and import the starter set from content/problems
    ```
 
 3. **Configure auth** in the Supabase dashboard (Authentication):
@@ -262,8 +318,14 @@ needed.
      built-in mailer only sends a few emails per hour.
 
 4. **Run it.**
+
    ```bash
    npm run dev
+   ```
+
+5. **Make yourself an admin.** Sign up on the site, then:
+   ```bash
+   npm run admin:grant -- you@example.com
    ```
 
 ## Scripts
@@ -276,7 +338,8 @@ needed.
 | `npm test`              | Vitest: unit + integration (sandbox, RLS, problem integrity)        |
 | `npm run test:e2e`      | Playwright: smoke test and the solve flow                           |
 | `npm run seed:check`    | Verify every problem in the sandbox; no network                     |
-| `npm run seed`          | Verify, then upload problems and hidden test cases                  |
+| `npm run seed`          | Verify, then import new starter problems; never overwrites          |
+| `npm run admin:grant`   | Make an account an admin (`--revoke` to undo)                       |
 | `npm run db:push`       | Apply migrations to the linked Supabase project                     |
 | `npm run db:types`      | Regenerate `src/types/database.ts` from the linked project          |
 | `npm run e2e:user`      | Create or reset the account the signed-in e2e test uses             |
@@ -285,18 +348,22 @@ needed.
 ## Testing
 
 - **Unit:** normalization and comparison edge cases, the query guard, grading verdicts (with a
-  fake runner), filtering, redirect sanitizing, time formatting.
+  fake runner), filtering, redirect sanitizing, time formatting, authoring and publish rules.
 - **Integration:**
   - The real sandbox in real worker threads: timeouts, the row cap, multi-statement and
-    data-modifying-CTE rejection, error positions.
-  - The real migrations and RLS policies in PGlite.
-  - The integrity of all 18 problems.
+    data-modifying-CTE rejection, error positions, and runaway SQL during verification.
+  - The real migrations and RLS policies in PGlite, including roles, proposals and `save_problem()`.
+  - The integrity of all 18 starter problems.
 - **End to end (Playwright):**
   - A visitor runs the `NOT IN` pitfall and sees "Differs", fixes it and sees "Matches".
   - A signed-in user submits and gets Accepted, and the submission appears in history.
+  - Non-admins can't reach the admin area or its API.
+  - A user proposes a problem, an admin fixes and publishes it, and it goes live.
 
-  The signed-in test needs a throwaway account. Set `E2E_USER_EMAIL` and `E2E_USER_PASSWORD`
-  in `.env.local`, then run `npm run e2e:user`. Without them the test skips.
+  The signed-in tests need a throwaway account. Set `E2E_USER_EMAIL` and `E2E_USER_PASSWORD`
+  in `.env.local`, then run `npm run e2e:user`. Without them those tests skip. The proposal test also
+  needs `E2E_ADMIN_EMAIL` and `E2E_ADMIN_PASSWORD`. It publishes a real problem and leaves it
+  unpublished, so point it at a test project.
 
 **CI** ([`.github/workflows/ci.yml`](.github/workflows/ci.yml)) runs lint, format check,
 typecheck and all Vitest suites. It then builds the app and runs Playwright against it.
@@ -336,16 +403,17 @@ typecheck and all Vitest suites. It then builds the app and runs Playwright agai
 - **PGlite instead of a hosted grading database.** It's free, needs no infrastructure, and is
   fully isolated per run. A dedicated grading service with real Postgres and `statement_timeout`
   would scale better and be closer to production; I'd move there under real load.
-- **Precomputed previews.** The seed script stores each problem's expected sample output and its
+- **Precomputed previews.** Publishing stores each problem's expected sample output and its
   table previews, so the schema viewer and "Expected" tab render instantly instead of waiting
   2–3 s for Postgres to boot in the browser. They're derived only from public data.
 - **Cache Components.** Problem pages are prerendered and cached, so they're identical for
   everyone. Per-user parts (header, solved marks, history) stream in behind `<Suspense>`. On the
   problem list the user's progress is passed to the client as a promise, so filters you touch
   aren't reset when it arrives.
-- **Problems as code, not a CMS.** They're reviewable in pull requests, verified in CI, and
-  uploaded by an idempotent seed. The trade-off is that adding a problem needs a deploy-time
-  seed.
+- **Problems in the database, not in code.** Admins and contributors can grow the problem set from
+  the site without a pull request or a deploy, and the sandbox checks every publish. The trade-offs
+  are that changes aren't reviewed in pull requests, CI doesn't check live problems, and the
+  database is the only copy of edited problems, so back it up.
 - **Not-found inside a stream.** Unknown problem slugs render the 404 page with HTTP 200 plus
   `noindex`, because the lookup happens inside a streamed Suspense boundary.
 

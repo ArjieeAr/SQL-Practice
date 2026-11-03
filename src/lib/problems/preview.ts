@@ -1,6 +1,6 @@
 /**
- * Shapes of the derived JSON stored on each problem (computed by the seed script from the
- * public sample data), with schemas to validate them when read back from the database.
+ * Shapes of the derived JSON stored on each problem (computed from the public sample data when
+ * it's published), with schemas to validate them when read back from the database.
  */
 import { z } from "zod";
 

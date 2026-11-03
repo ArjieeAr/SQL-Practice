@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 
 import { gradeSubmission } from "@/lib/grader/grade";
+import { verifyProblem } from "@/lib/problems/verify";
 import type { CaseJob } from "@/lib/sandbox/protocol";
 import { runCaseInWorker } from "@/lib/sandbox/run-case";
 
@@ -75,6 +76,104 @@ describe("runCaseInWorker", () => {
   it("reports broken test data as an internal error, not the user's fault", async () => {
     const run = await runCaseInWorker(job("SELECT 1", { setupSql: "CREATE TABLE oops (" }));
     expect(run).toMatchObject({ type: "internal_error" });
+  });
+});
+
+describe("verifyProblem", () => {
+  const problem = {
+    slug: "top-salary",
+    schemaSql,
+    sampleDataSql: dataSql,
+    solutionSql: reference,
+    orderMatters: false,
+    cases: [
+      { name: "ties and NULL dept", sql: dataSql },
+      { name: "empty table", sql: "" },
+    ],
+    pitfalls: [],
+  };
+  // Keeps generating rows until the worker is killed, unlike a query that would eventually finish.
+  const RUNAWAY = "SELECT count(*) FROM generate_series(1, 10000000000)";
+
+  it("reports expected results, the sample tables, and which case catches each pitfall", async () => {
+    const verification = await verifyProblem({
+      ...problem,
+      pitfalls: [
+        {
+          name: "drops NULL dept",
+          sql: "SELECT dept, max(salary) FROM employees WHERE dept IS NOT NULL GROUP BY dept",
+        },
+        { name: "actually correct", sql: reference },
+      ],
+    });
+    expect(verification.sampleExpected.rows).toHaveLength(3);
+    expect(verification.sampleTables.map((table) => table.name)).toEqual(["employees"]);
+    expect(verification.sampleTables[0].columns[0]).toMatchObject({
+      name: "id",
+      primaryKey: true,
+    });
+    expect(verification.cases.map((c) => c.name)).toEqual(["ties and NULL dept", "empty table"]);
+    expect(verification.pitfalls).toEqual([
+      { name: "drops NULL dept", caughtBy: "ties and NULL dept" },
+      { name: "actually correct", caughtBy: null },
+    ]);
+  });
+
+  it("explains broken SQL in each part of a problem", async () => {
+    await expect(verifyProblem({ ...problem, schemaSql: "CREATE TABLE oops (" })).rejects.toThrow(
+      /sample data failed to load/,
+    );
+    await expect(verifyProblem({ ...problem, solutionSql: "SELECT nope" })).rejects.toThrow(
+      /reference failed on sample data/,
+    );
+    await expect(
+      verifyProblem({
+        ...problem,
+        cases: [{ name: "bad data", sql: "INSERT INTO nope VALUES (1)" }],
+      }),
+    ).rejects.toThrow(/case "bad data" failed to load/);
+    await expect(
+      verifyProblem({ ...problem, pitfalls: [{ name: "typo", sql: "SELECT nope" }] }),
+    ).rejects.toThrow(/pitfall "typo" errors on the sample data/);
+  });
+
+  it("refuses a statement that isn't a read query as the reference", async () => {
+    await expect(
+      verifyProblem({ ...problem, solutionSql: "DELETE FROM employees" }),
+    ).rejects.toThrow(/reference failed/);
+  });
+
+  it("kills a runaway reference without blocking this thread", async () => {
+    const tick = setInterval(() => (ticks += 1), 50);
+    let ticks = 0;
+    try {
+      await expect(
+        verifyProblem({ ...problem, solutionSql: RUNAWAY }, { queryTimeoutMs: 500 }),
+      ).rejects.toThrow(/took too long/);
+    } finally {
+      clearInterval(tick);
+    }
+    // In-thread, PGlite would have blocked the event loop, so these timers could never have fired.
+    expect(ticks).toBeGreaterThan(5);
+  });
+
+  it("kills runaway setup SQL, which can come from a user's proposal", async () => {
+    const tick = setInterval(() => (ticks += 1), 50);
+    let ticks = 0;
+    try {
+      await expect(
+        verifyProblem(
+          {
+            ...problem,
+            sampleDataSql: `INSERT INTO employees (id, name) SELECT g, 'x' FROM generate_series(1, 10000000000) g;`,
+          },
+          { bootTimeoutMs: 3_000 },
+        ),
+      ).rejects.toThrow(/took too long/);
+    } finally {
+      clearInterval(tick);
+    }
+    expect(ticks).toBeGreaterThan(5);
   });
 });
 

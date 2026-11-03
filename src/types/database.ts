@@ -14,16 +14,98 @@ export type Database = {
   }
   public: {
     Tables: {
+      problem_proposals: {
+        Row: {
+          cases: Json
+          created_at: string
+          description_md: string
+          difficulty: Database["public"]["Enums"]["difficulty"]
+          id: string
+          problem_id: string | null
+          review_note: string | null
+          reviewed_at: string | null
+          reviewed_by: string | null
+          sample_data_sql: string | null
+          schema_sql: string | null
+          solution_sql: string | null
+          status: Database["public"]["Enums"]["proposal_status"]
+          tags: string[]
+          title: string
+          user_id: string
+        }
+        Insert: {
+          cases?: Json
+          created_at?: string
+          description_md: string
+          difficulty: Database["public"]["Enums"]["difficulty"]
+          id?: string
+          problem_id?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sample_data_sql?: string | null
+          schema_sql?: string | null
+          solution_sql?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          tags?: string[]
+          title: string
+          user_id: string
+        }
+        Update: {
+          cases?: Json
+          created_at?: string
+          description_md?: string
+          difficulty?: Database["public"]["Enums"]["difficulty"]
+          id?: string
+          problem_id?: string | null
+          review_note?: string | null
+          reviewed_at?: string | null
+          reviewed_by?: string | null
+          sample_data_sql?: string | null
+          schema_sql?: string | null
+          solution_sql?: string | null
+          status?: Database["public"]["Enums"]["proposal_status"]
+          tags?: string[]
+          title?: string
+          user_id?: string
+        }
+        Relationships: [
+          {
+            foreignKeyName: "problem_proposals_problem_id_fkey"
+            columns: ["problem_id"]
+            isOneToOne: false
+            referencedRelation: "problems"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "problem_proposals_reviewed_by_fkey"
+            columns: ["reviewed_by"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+          {
+            foreignKeyName: "problem_proposals_user_id_fkey"
+            columns: ["user_id"]
+            isOneToOne: false
+            referencedRelation: "profiles"
+            referencedColumns: ["id"]
+          },
+        ]
+      }
       problem_solutions: {
         Row: {
+          pitfalls: Json
           problem_id: string
           reference_sql: string
         }
         Insert: {
+          pitfalls?: Json
           problem_id: string
           reference_sql: string
         }
         Update: {
+          pitfalls?: Json
           problem_id?: string
           reference_sql?: string
         }
@@ -100,18 +182,21 @@ export type Database = {
           created_at: string
           display_name: string | null
           id: string
+          role: Database["public"]["Enums"]["account_role"]
         }
         Insert: {
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null
           id: string
+          role?: Database["public"]["Enums"]["account_role"]
         }
         Update: {
           avatar_url?: string | null
           created_at?: string
           display_name?: string | null
           id?: string
+          role?: Database["public"]["Enums"]["account_role"]
         }
         Relationships: []
       }
@@ -258,9 +343,12 @@ export type Database = {
           medium_total: number
         }[]
       }
+      save_problem: { Args: { payload: Json }; Returns: Json }
     }
     Enums: {
+      account_role: "user" | "admin"
       difficulty: "easy" | "medium" | "hard"
+      proposal_status: "pending" | "approved" | "rejected"
       submission_status: "accepted" | "wrong_answer" | "error" | "timeout"
     }
     CompositeTypes: {
@@ -389,7 +477,9 @@ export type CompositeTypes<
 export const Constants = {
   public: {
     Enums: {
+      account_role: ["user", "admin"],
       difficulty: ["easy", "medium", "hard"],
+      proposal_status: ["pending", "approved", "rejected"],
       submission_status: ["accepted", "wrong_answer", "error", "timeout"],
     },
   },

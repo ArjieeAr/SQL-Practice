@@ -1,6 +1,7 @@
 /**
- * Loads problem definitions from content/problems. Node-only (reads the filesystem); used by
- * the seed script and the content integrity test, never shipped to the browser.
+ * Loads the starter problem set from content/problems. Node-only (reads the filesystem); used by
+ * the seed script and the content integrity test, never shipped to the browser. Live problems are
+ * managed in the database, so these files stop matching production once admins edit a problem.
  */
 import { readdir, readFile } from "node:fs/promises";
 import path from "node:path";

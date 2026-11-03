@@ -9,6 +9,8 @@ import { asAdmin, asClient, createMigratedDatabase } from "../support/database";
 
 const ALICE = "00000000-0000-4000-8000-00000000000a";
 const BOB = "00000000-0000-4000-8000-00000000000b";
+const EVE = "00000000-0000-4000-8000-00000000000e";
+const PROPOSAL = "20000000-0000-4000-8000-000000000001";
 const PUBLISHED = "10000000-0000-4000-8000-000000000001";
 const DRAFT = "10000000-0000-4000-8000-000000000002";
 const HARD = "10000000-0000-4000-8000-000000000003";
@@ -145,6 +147,306 @@ describe("profiles", () => {
         db.query("UPDATE profiles SET id = $1 WHERE id = $2", [ALICE, BOB]),
       ),
     );
+  });
+
+  it("start as regular users, whatever the sign-up metadata claims", async () => {
+    await asAdmin(db, async () => {
+      await db.query(
+        `INSERT INTO auth.users (id, email, raw_user_meta_data) VALUES ($1, 'eve@example.com', $2)`,
+        [EVE, JSON.stringify({ role: "admin" })],
+      );
+      const { rows } = await db.query("SELECT role FROM profiles WHERE id = $1", [EVE]);
+      expect(rows).toEqual([{ role: "user" }]);
+    });
+  });
+
+  it("users can read their own role", async () => {
+    const { rows } = await asClient(db, "authenticated", BOB, () =>
+      db.query("SELECT role FROM profiles WHERE id = $1", [BOB]),
+    );
+    expect(rows).toEqual([{ role: "user" }]);
+  });
+
+  it("users cannot make themselves admin", async () => {
+    await expectDenied(
+      asClient(db, "authenticated", BOB, () =>
+        db.query("UPDATE profiles SET role = 'admin' WHERE id = $1", [BOB]),
+      ),
+    );
+  });
+});
+
+describe("problem_proposals", () => {
+  const INSERT_PROPOSAL = `INSERT INTO problem_proposals (id, user_id, title, difficulty, description_md)
+    VALUES ($1, $2, 'An idea', 'easy', 'Details') `;
+
+  /** Run as the database owner with one proposal from Alice. Rolled back afterwards. */
+  const withProposal = (fn: () => Promise<void>) =>
+    asAdmin(db, async () => {
+      await db.query(INSERT_PROPOSAL, [PROPOSAL, ALICE]);
+      await fn();
+    });
+
+  /** Become a client inside the current transaction. */
+  const becomeClient = async (user: string) => {
+    await db.query("SELECT set_config('request.jwt.claims', $1, true)", [
+      JSON.stringify({ sub: user }),
+    ]);
+    await db.exec("SET LOCAL ROLE authenticated");
+  };
+
+  it("users only see their own", async () => {
+    await withProposal(async () => {
+      await becomeClient(BOB);
+      expect((await db.query("SELECT id FROM problem_proposals")).rows).toEqual([]);
+      await db.exec("RESET ROLE");
+
+      await becomeClient(ALICE);
+      expect((await db.query("SELECT id FROM problem_proposals")).rows).toEqual([{ id: PROPOSAL }]);
+    });
+  });
+
+  it("signed-out visitors cannot read them", async () => {
+    await expectDenied(
+      asClient(db, "anon", null, () => db.query("SELECT * FROM problem_proposals")),
+    );
+  });
+
+  it("clients cannot create them directly, skipping validation and the rate limit", async () => {
+    await expectDenied(
+      asClient(db, "authenticated", BOB, () => db.query(INSERT_PROPOSAL, [PROPOSAL, BOB])),
+    );
+  });
+
+  it("clients cannot approve their own", async () => {
+    await expectDenied(
+      asClient(db, "authenticated", BOB, () =>
+        db.query("UPDATE problem_proposals SET status = 'approved' WHERE user_id = $1", [BOB]),
+      ),
+    );
+  });
+
+  it("reject titles and SQL over the size limits", async () => {
+    await expect(
+      asAdmin(db, () =>
+        db.query(
+          `INSERT INTO problem_proposals (user_id, title, difficulty, description_md)
+           VALUES ($1, repeat('x', 121), 'easy', 'd')`,
+          [ALICE],
+        ),
+      ),
+    ).rejects.toThrow(/check constraint/);
+  });
+});
+
+describe("save_problem()", () => {
+  const payload = (overrides: Record<string, unknown> = {}) => ({
+    slug: "new-problem",
+    title: "New Problem",
+    difficulty: "medium",
+    tags: ["joins", "dates"],
+    description_md: "Do the thing.",
+    schema_sql: "CREATE TABLE t (x int);",
+    sample_data_sql: "INSERT INTO t VALUES (1);",
+    order_matters: true,
+    is_published: true,
+    sample_expected: { columns: [], rows: [], truncated: false },
+    sample_tables: [],
+    reference_sql: "SELECT x FROM t ORDER BY x",
+    pitfalls: [{ name: "wrong", sql: "SELECT 1" }],
+    cases: [
+      { name: "first", sql: "INSERT INTO t VALUES (1);" },
+      { name: "second", sql: "" },
+    ],
+    ...overrides,
+  });
+  const save = async (input: Record<string, unknown>) => {
+    const { rows } = await db.query<{ saved: { id: string; slug: string; number: number } }>(
+      "SELECT save_problem($1) AS saved",
+      [JSON.stringify(input)],
+    );
+    return rows[0].saved;
+  };
+  const caseNames = async (problemId: string) => {
+    const { rows } = await db.query<{ name: string }>(
+      "SELECT name FROM test_cases WHERE problem_id = $1 ORDER BY position",
+      [problemId],
+    );
+    return rows.map((row) => row.name);
+  };
+
+  for (const [role, user] of [
+    ["anon", null],
+    ["authenticated", ALICE],
+  ] as const) {
+    it(`is not callable by ${role} clients`, async () => {
+      await expectDenied(
+        asClient(db, role, user, () =>
+          db.query("SELECT save_problem($1)", [JSON.stringify(payload())]),
+        ),
+      );
+    });
+  }
+
+  it("is callable by the service role", async () => {
+    await asAdmin(db, async () => {
+      await db.exec("SET LOCAL ROLE service_role");
+      await expect(save(payload())).resolves.toMatchObject({ slug: "new-problem" });
+    });
+  });
+
+  it("creates a problem with its hidden parts, using the next free number", async () => {
+    await asAdmin(db, async () => {
+      const saved = await save(payload());
+      expect(saved).toMatchObject({ slug: "new-problem", number: 4 });
+
+      const { rows } = await db.query(
+        "SELECT title, tags, order_matters, is_published FROM problems WHERE id = $1",
+        [saved.id],
+      );
+      expect(rows).toEqual([
+        {
+          title: "New Problem",
+          tags: ["joins", "dates"],
+          order_matters: true,
+          is_published: true,
+        },
+      ]);
+      const solution = await db.query(
+        "SELECT reference_sql, pitfalls FROM problem_solutions WHERE problem_id = $1",
+        [saved.id],
+      );
+      expect(solution.rows).toEqual([
+        {
+          reference_sql: "SELECT x FROM t ORDER BY x",
+          pitfalls: [{ name: "wrong", sql: "SELECT 1" }],
+        },
+      ]);
+      expect(await caseNames(saved.id)).toEqual(["first", "second"]);
+
+      expect((await save(payload({ slug: "another" }))).number).toBe(5);
+    });
+  });
+
+  it("uses the requested number when given one", async () => {
+    await asAdmin(db, async () => {
+      expect((await save(payload({ number: 40 }))).number).toBe(40);
+    });
+  });
+
+  it("edits replace the test cases, but never the slug or number", async () => {
+    await asAdmin(db, async () => {
+      const created = await save(payload());
+      const edited = await save(
+        payload({
+          id: created.id,
+          slug: "renamed",
+          number: 99,
+          title: "Edited",
+          cases: [{ name: "only", sql: "" }],
+        }),
+      );
+      expect(edited).toEqual(created);
+      expect(await caseNames(created.id)).toEqual(["only"]);
+      const { rows } = await db.query("SELECT title FROM problems WHERE id = $1", [created.id]);
+      expect(rows).toEqual([{ title: "Edited" }]);
+    });
+  });
+
+  it("rolls back completely when any part fails", async () => {
+    // A case without a name violates test_cases.name NOT NULL, after the other writes succeeded.
+    await asAdmin(db, async () => {
+      const created = await save(payload());
+      await db.exec("SAVEPOINT before_edit");
+      await expect(
+        save(payload({ id: created.id, title: "Half done", cases: [{ sql: "" }] })),
+      ).rejects.toThrow(/null value/);
+      await db.exec("ROLLBACK TO SAVEPOINT before_edit");
+
+      const { rows } = await db.query("SELECT title FROM problems WHERE id = $1", [created.id]);
+      expect(rows).toEqual([{ title: "New Problem" }]);
+      expect(await caseNames(created.id)).toEqual(["first", "second"]);
+    });
+  });
+
+  it("refuses to edit a problem that doesn't exist, or reuse a slug", async () => {
+    await expect(asAdmin(db, () => save(payload({ id: PROPOSAL })))).rejects.toThrow(
+      /does not exist/,
+    );
+    await expect(asAdmin(db, () => save(payload({ slug: "top-earners" })))).rejects.toThrow(
+      /unique/,
+    );
+  });
+
+  describe("with a proposal", () => {
+    const proposal = async (status = "pending") => {
+      await db.query(
+        `INSERT INTO problem_proposals (id, user_id, title, difficulty, description_md, status)
+         VALUES ($1, $2, 'An idea', 'easy', 'Details', $3)`,
+        [PROPOSAL, ALICE, status],
+      );
+    };
+    const readProposal = async () => {
+      const { rows } = await db.query<{
+        status: string;
+        problem_id: string | null;
+        reviewed_by: string | null;
+        reviewed: boolean;
+      }>(
+        `SELECT status, problem_id, reviewed_by, reviewed_at IS NOT NULL AS reviewed
+         FROM problem_proposals WHERE id = $1`,
+        [PROPOSAL],
+      );
+      return rows[0];
+    };
+
+    it("a draft links the proposal but leaves it pending", async () => {
+      await asAdmin(db, async () => {
+        await proposal();
+        const saved = await save(payload({ proposal_id: PROPOSAL, is_published: false }));
+        expect(await readProposal()).toEqual({
+          status: "pending",
+          problem_id: saved.id,
+          reviewed_by: null,
+          reviewed: false,
+        });
+      });
+    });
+
+    it("publishing approves it, even when it was linked by an earlier draft", async () => {
+      await asAdmin(db, async () => {
+        await proposal();
+        const draft = await save(payload({ proposal_id: PROPOSAL, is_published: false }));
+        await save(payload({ id: draft.id, reviewer_id: BOB }));
+        expect(await readProposal()).toEqual({
+          status: "approved",
+          problem_id: draft.id,
+          reviewed_by: BOB,
+          reviewed: true,
+        });
+      });
+    });
+
+    it("refuses a proposal that was already rejected, saving nothing", async () => {
+      await asAdmin(db, async () => {
+        await proposal("rejected");
+        await db.exec("SAVEPOINT before_save");
+        await expect(save(payload({ proposal_id: PROPOSAL }))).rejects.toThrow(/no longer open/);
+        await db.exec("ROLLBACK TO SAVEPOINT before_save");
+        const { rows } = await db.query("SELECT 1 FROM problems WHERE slug = 'new-problem'");
+        expect(rows).toEqual([]);
+      });
+    });
+
+    it("refuses a proposal already linked to a different problem", async () => {
+      await asAdmin(db, async () => {
+        await proposal();
+        await save(payload({ proposal_id: PROPOSAL, is_published: false }));
+        await expect(
+          save(payload({ slug: "another", proposal_id: PROPOSAL, is_published: false })),
+        ).rejects.toThrow(/no longer open/);
+      });
+    });
   });
 });
 
