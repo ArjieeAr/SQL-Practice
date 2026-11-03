@@ -1,15 +1,26 @@
 /**
- * Runs a problem definition through the real sandbox to check it is gradeable. Used by the
- * content integrity test and by the seed script, which refuses to upload a broken problem.
+ * Runs a problem through the real sandbox to check it is gradeable. Used by the content integrity
+ * test, the seed script, and the admin editor, which refuses to publish a broken problem. The SQL
+ * may come from a user's proposal, so every dataset runs in a worker thread that can be killed.
  */
-import { createSandbox, runReadOnlyQuery, SandboxQueryError } from "@/lib/sandbox/engine.mjs";
+import { runDatasetInWorker } from "@/lib/sandbox/run-case";
+import type { RunCaseOptions } from "@/lib/sandbox/run-case";
 import { compareResults } from "@/lib/sql/compare";
 import { LIMITS } from "@/lib/sql/limits";
 import type { RawResult } from "@/lib/sql/types";
 
-import type { ProblemDefinition } from "./content";
-import { introspectTables } from "./introspect";
+import { checkProblemShape, type AuthoredProblem } from "./authoring";
 import type { SampleTable } from "./preview";
+
+/** What verification needs to know about a problem; content files and the editor both provide it. */
+export type VerifiableProblem = Pick<
+  AuthoredProblem,
+  "schemaSql" | "sampleDataSql" | "solutionSql" | "orderMatters" | "pitfalls"
+> & {
+  slug: string;
+  /** Hidden test cases. A content file's extra fields are ignored. */
+  cases: { name: string; sql: string }[];
+};
 
 export interface ProblemVerification {
   /** The reference result on the public sample data, shown to users as "expected output". */
@@ -25,55 +36,54 @@ type PitfallOutcome = "passed" | "wrong" | { error: string };
 
 /** Load one dataset, then run the reference and every pitfall against it. */
 async function runDataset(
-  problem: ProblemDefinition,
+  problem: VerifiableProblem,
   dataSql: string,
   label: string,
-  snapshot: SharedArrayBuffer | undefined,
-  { withTables = false } = {},
+  { withTables = false, ...options }: RunCaseOptions & { withTables?: boolean } = {},
 ) {
-  let db;
-  try {
-    db = await createSandbox(`${problem.schemaSql}\n${dataSql}`, snapshot);
-  } catch (err) {
-    throw new Error(`${problem.slug}: ${label} failed to load: ${(err as Error).message}`);
-  }
-  try {
-    let expected: RawResult;
-    try {
-      expected = await runReadOnlyQuery(db, problem.solutionSql, LIMITS.maxResultRows);
-    } catch (err) {
-      throw new Error(`${problem.slug}: reference failed on ${label}: ${(err as Error).message}`);
-    }
-    if (expected.truncated) {
-      throw new Error(`${problem.slug}: reference result on ${label} exceeds the row limit`);
-    }
+  const run = await runDatasetInWorker(
+    {
+      setupSql: `${problem.schemaSql}\n${dataSql}`,
+      referenceSql: problem.solutionSql,
+      pitfallSqls: problem.pitfalls.map((p) => p.sql),
+      maxRows: LIMITS.maxResultRows,
+      withTables,
+    },
+    options,
+  );
 
-    // One at a time: each query opens a transaction and a cursor on this single connection, so
-    // running them concurrently would interleave and fail for reasons unrelated to the SQL.
-    const pitfallOutcomes: PitfallOutcome[] = [];
-    for (const pitfall of problem.pitfalls) {
-      try {
-        const actual = await runReadOnlyQuery(db, pitfall.sql, LIMITS.maxResultRows);
-        const { equal } = compareResults(expected, actual, { orderMatters: problem.orderMatters });
-        pitfallOutcomes.push(equal ? "passed" : "wrong");
-      } catch (err) {
-        if (!(err instanceof SandboxQueryError)) throw err;
-        pitfallOutcomes.push({ error: err.message });
-      }
-    }
-    const tables = withTables ? await introspectTables(db) : [];
-    return { expected, pitfallOutcomes, tables };
-  } finally {
-    await db.close();
+  switch (run.type) {
+    case "setup_error":
+      throw new Error(`${problem.slug}: ${label} failed to load: ${run.message}`);
+    case "reference_error":
+      throw new Error(`${problem.slug}: reference failed on ${label}: ${run.message}`);
+    case "internal_error":
+      throw new Error(`${problem.slug}: ${label}: ${run.message}`);
+    case "timeout":
+      throw new Error(`${problem.slug}: ${label} took too long to run`);
   }
+
+  if (run.expected.truncated) {
+    throw new Error(`${problem.slug}: reference result on ${label} exceeds the row limit`);
+  }
+
+  const pitfallOutcomes = run.pitfalls.map((pitfall): PitfallOutcome => {
+    if ("error" in pitfall) return { error: pitfall.error };
+    const { equal } = compareResults(run.expected, pitfall.result, {
+      orderMatters: problem.orderMatters,
+    });
+    return equal ? "passed" : "wrong";
+  });
+  return { expected: run.expected, pitfallOutcomes, tables: run.tables };
 }
 
 export async function verifyProblem(
-  problem: ProblemDefinition,
-  snapshot?: SharedArrayBuffer,
+  problem: VerifiableProblem,
+  options: RunCaseOptions = {},
 ): Promise<ProblemVerification> {
   // Sequential on purpose: PGlite is single-threaded, so parallel instances only add memory.
-  const sample = await runDataset(problem, problem.sampleDataSql, "sample data", snapshot, {
+  const sample = await runDataset(problem, problem.sampleDataSql, "sample data", {
+    ...options,
     withTables: true,
   });
 
@@ -89,7 +99,7 @@ export async function verifyProblem(
   const cases: ProblemVerification["cases"] = [];
   const caughtBy: (string | null)[] = problem.pitfalls.map(() => null);
   for (const testCase of problem.cases) {
-    const run = await runDataset(problem, testCase.sql, `case "${testCase.name}"`, snapshot);
+    const run = await runDataset(problem, testCase.sql, `case "${testCase.name}"`, options);
     cases.push({ name: testCase.name, expected: run.expected });
     // An error on a hidden case (e.g. division by zero on an edge case) is a rejection too.
     run.pitfallOutcomes.forEach((outcome, i) => {
@@ -103,4 +113,24 @@ export async function verifyProblem(
     cases,
     pitfalls: problem.pitfalls.map((p, i) => ({ name: p.name, caughtBy: caughtBy[i] })),
   };
+}
+
+/** Everything that must hold before a problem can go live. Returns one message per failed rule. */
+export function checkPublishRules(
+  problem: Parameters<typeof checkProblemShape>[0],
+  verification: ProblemVerification,
+): string[] {
+  const issues = checkProblemShape(problem);
+  if (verification.sampleExpected.rows.length === 0) {
+    issues.push("The reference returns no rows on the sample data, so Run has nothing to show.");
+  }
+  if (verification.sampleTables.length === 0) {
+    issues.push("The schema doesn't create any tables.");
+  }
+  for (const pitfall of verification.pitfalls) {
+    if (pitfall.caughtBy === null) {
+      issues.push(`No hidden test case rejects the pitfall "${pitfall.name}".`);
+    }
+  }
+  return issues;
 }

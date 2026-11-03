@@ -8,10 +8,11 @@ import type { Database } from "@/types/database";
 let client: SupabaseClient<Database> | undefined;
 
 /**
- * Service-role client: bypasses RLS. Used only by the grader, to read hidden test cases and
- * reference solutions and to record submissions. Never acts on behalf of a request's cookies.
+ * Service-role client: bypasses RLS. Used by the grader, to read hidden test cases and reference
+ * solutions and to record submissions, and by admin and proposal code after it has checked the
+ * caller. Never acts on behalf of a request's cookies.
  *
- * Created lazily so the secret is only required when grading actually runs; `next build` imports
+ * Created lazily so the secret is only required when it's actually used; `next build` imports
  * route modules and must not need it (CI builds without the secret).
  */
 export async function getAdminClient(): Promise<SupabaseClient<Database>> {

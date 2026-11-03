@@ -1,19 +1,22 @@
 /**
- * Upload content/problems to Supabase.
+ * Import the starter problem set from content/problems into Supabase.
  *
- *   npm run seed          verify every problem, then upload (needs .env.local)
+ *   npm run seed          verify every problem, then import (needs .env.local)
  *   npm run seed:check    verify only: no network, no credentials
  *
- * Every problem is verified in the sandbox first, and nothing is written unless all of them
- * pass, so a broken reference solution can never reach the database. Re-running is safe:
- * problems are upserted by slug, test cases are replaced, and problems removed from content/
- * are unpublished rather than deleted (users' submissions still point at them).
+ * The database owns problems: admins edit them on the site. So this never overwrites or unpublishes
+ * anything, and re-running it is safe. It only:
+ * - inserts problems whose slug isn't in the database yet, and
+ * - fills in pitfalls on existing problems that have none, which brings forward problems seeded
+ *   before pitfalls were stored in the database.
+ *
+ * Every problem is verified in the sandbox first, and nothing is written unless all of them pass,
+ * so a broken reference solution can never reach the database.
  */
 import { createClient } from "@supabase/supabase-js";
 
 import { loadProblems, type ProblemDefinition } from "@/lib/problems/content";
-import { verifyProblem, type ProblemVerification } from "@/lib/problems/verify";
-import { createSnapshot } from "@/lib/sandbox/engine.mjs";
+import { checkPublishRules, verifyProblem, type ProblemVerification } from "@/lib/problems/verify";
 import type { Database, Json } from "@/types/database";
 
 const dryRun = process.argv.includes("--dry-run");
@@ -23,21 +26,17 @@ function fail(message: string): never {
   process.exit(1);
 }
 
+const namedSqlJson = (items: { name: string; sql: string }[]) =>
+  items.map(({ name, sql }) => ({ name, sql }));
+
 // 1. Verify everything before touching the database.
 const problems = await loadProblems();
-const snapshot = await createSnapshot();
 const verified: { problem: ProblemDefinition; verification: ProblemVerification }[] = [];
 
 for (const problem of problems) {
-  const verification = await verifyProblem(problem, snapshot).catch((err: Error) =>
-    fail(err.message),
-  );
-  const uncaught = verification.pitfalls.filter((p) => p.caughtBy === null);
-  if (uncaught.length > 0) {
-    fail(
-      `${problem.slug}: no hidden case rejects pitfall(s): ${uncaught.map((p) => p.name).join("; ")}`,
-    );
-  }
+  const verification = await verifyProblem(problem).catch((err: Error) => fail(err.message));
+  const issues = checkPublishRules(problem, verification);
+  if (issues.length > 0) fail(`${problem.slug}: ${issues.join(" ")}`);
   verified.push({ problem, verification });
   console.log(
     `✓ ${String(problem.number).padStart(2)}. ${problem.title} ` +
@@ -50,7 +49,7 @@ if (dryRun) {
   process.exit(0);
 }
 
-// 2. Upload with the secret key (bypasses RLS; this script is the only writer of problems).
+// 2. Import with the secret key (bypasses RLS).
 const url = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const secretKey = process.env.SUPABASE_SECRET_KEY;
 if (!url || !secretKey) {
@@ -60,65 +59,61 @@ const supabase = createClient<Database>(url, secretKey, {
   auth: { persistSession: false, autoRefreshToken: false },
 });
 
-const { data: rows, error: problemsError } = await supabase
+const { data: existing, error: existingError } = await supabase
   .from("problems")
-  .upsert(
-    verified.map(({ problem, verification }) => ({
+  .select("id, slug, number, problem_solutions(pitfalls)");
+if (existingError) fail(`Reading existing problems failed: ${existingError.message}`);
+
+const existingBySlug = new Map(existing.map((row) => [row.slug, row]));
+const takenNumbers = new Set(existing.map((row) => row.number));
+
+let inserted = 0;
+let backfilled = 0;
+
+for (const { problem, verification } of verified) {
+  const row = existingBySlug.get(problem.slug);
+
+  if (row) {
+    const stored = row.problem_solutions?.pitfalls;
+    const storedNothing = Array.isArray(stored) && stored.length === 0;
+    if (!storedNothing || problem.pitfalls.length === 0) continue;
+
+    const { error } = await supabase
+      .from("problem_solutions")
+      .update({ pitfalls: namedSqlJson(problem.pitfalls) })
+      .eq("problem_id", row.id);
+    if (error) fail(`${problem.slug}: backfilling pitfalls failed: ${error.message}`);
+    backfilled += 1;
+    continue;
+  }
+
+  const { error } = await supabase.rpc("save_problem", {
+    payload: {
+      // An admin may have taken this number already: then save_problem uses the next free one.
+      number: takenNumbers.has(problem.number) ? undefined : problem.number,
       slug: problem.slug,
-      number: problem.number,
       title: problem.title,
       difficulty: problem.difficulty,
       tags: problem.tags,
       description_md: problem.descriptionMd,
       schema_sql: problem.schemaSql,
       sample_data_sql: problem.sampleDataSql,
+      order_matters: problem.orderMatters,
+      is_published: problem.published,
       // RawResult is plain JSON data; the cast only bridges interface vs. index-signature types.
       sample_expected: verification.sampleExpected as unknown as Json,
       sample_tables: verification.sampleTables as unknown as Json,
-      order_matters: problem.orderMatters,
-      is_published: problem.published,
-    })),
-    { onConflict: "slug" },
-  )
-  .select("id, slug");
-if (problemsError) fail(`Upserting problems failed: ${problemsError.message}`);
-
-const idBySlug = new Map(rows.map((row) => [row.slug, row.id]));
-const problemId = (slug: string) => idBySlug.get(slug) ?? fail(`No id returned for ${slug}`);
-
-const { error: solutionsError } = await supabase.from("problem_solutions").upsert(
-  problems.map((p) => ({ problem_id: problemId(p.slug), reference_sql: p.solutionSql })),
-  { onConflict: "problem_id" },
-);
-if (solutionsError) fail(`Upserting reference solutions failed: ${solutionsError.message}`);
-
-// Replace test cases wholesale: simpler than diffing, and cases have no dependents.
-const ids = problems.map((p) => problemId(p.slug));
-const { error: deleteError } = await supabase.from("test_cases").delete().in("problem_id", ids);
-if (deleteError) fail(`Clearing old test cases failed: ${deleteError.message}`);
-
-const { error: casesError } = await supabase.from("test_cases").insert(
-  problems.flatMap((p) =>
-    p.cases.map((testCase, i) => ({
-      problem_id: problemId(p.slug),
-      position: i + 1,
-      name: testCase.name,
-      data_sql: testCase.sql,
-    })),
-  ),
-);
-if (casesError) fail(`Inserting test cases failed: ${casesError.message}`);
-
-const { data: unpublished, error: unpublishError } = await supabase
-  .from("problems")
-  .update({ is_published: false })
-  .not("slug", "in", `(${problems.map((p) => p.slug).join(",")})`)
-  .eq("is_published", true)
-  .select("slug");
-if (unpublishError) fail(`Unpublishing removed problems failed: ${unpublishError.message}`);
+      reference_sql: problem.solutionSql,
+      pitfalls: namedSqlJson(problem.pitfalls),
+      cases: namedSqlJson(problem.cases),
+    },
+  });
+  if (error) fail(`${problem.slug}: importing failed: ${error.message}`);
+  inserted += 1;
+}
 
 console.log(
-  `\nUploaded ${problems.length} problems and ${problems.reduce((n, p) => n + p.cases.length, 0)} test cases.` +
-    (unpublished.length ? ` Unpublished: ${unpublished.map((r) => r.slug).join(", ")}.` : ""),
+  `\nImported ${inserted} new problems and backfilled pitfalls on ${backfilled}. ` +
+    `Existing problems were otherwise left alone: edit them on the site.`,
 );
 process.exit(0);

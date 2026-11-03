@@ -18,6 +18,7 @@
     "db:link": "supabase link",
     "seed": "tsx --env-file=.env.local scripts/seed.mts",
     "seed:check": "tsx scripts/seed.mts --dry-run",
+    "admin:grant": "tsx --env-file=.env.local scripts/set-role.mts",
     "e2e:user": "tsx --env-file=.env.local scripts/create-e2e-user.mts",
     "screenshots": "tsx scripts/screenshots.mts"
   },

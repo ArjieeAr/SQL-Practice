@@ -1,4 +1,5 @@
 import type { Metadata } from "next";
+import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 
@@ -36,6 +37,10 @@ async function ProfileContent() {
         <p className="text-muted text-sm">
           {data.displayName && data.email ? `${data.email} · ` : ""}
           Member since {monthYear.format(new Date(data.memberSince))}
+          {" · "}
+          <Link href="/proposals" className="text-accent hover:underline">
+            Your proposals
+          </Link>
         </p>
       </header>
 
