@@ -1,4 +1,4 @@
-import { LogOut } from "lucide-react";
+import { LogOut, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 
 import { signOut } from "@/app/login/actions";
@@ -14,13 +14,23 @@ export async function UserMenu() {
 
   const { data: profile } = await supabase
     .from("profiles")
-    .select("display_name")
+    .select("display_name, role")
     .eq("id", auth.claims.sub)
     .maybeSingle();
   const name = profile?.display_name || auth.claims.email || "Account";
 
   return (
     <div className="flex items-center gap-3">
+      {profile?.role === "admin" && (
+        <Link
+          href="/admin"
+          title="Admin"
+          className="text-muted hover:text-foreground inline-flex items-center gap-1 text-sm transition-colors"
+        >
+          <ShieldCheck className="size-4" />
+          <span className="sr-only sm:not-sr-only">Admin</span>
+        </Link>
+      )}
       <Link
         href="/profile"
         title="Your profile"

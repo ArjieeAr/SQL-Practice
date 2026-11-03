@@ -6,16 +6,9 @@
 import { beforeAll, describe, expect, it } from "vitest";
 
 import { loadProblems } from "@/lib/problems/content";
-import { verifyProblem, type ProblemVerification } from "@/lib/problems/verify";
-import { createSnapshot } from "@/lib/sandbox/engine.mjs";
-import { checkUserQuery } from "@/lib/sql/guard";
+import { checkPublishRules, verifyProblem, type ProblemVerification } from "@/lib/problems/verify";
 
 const problems = await loadProblems();
-
-let snapshot: SharedArrayBuffer;
-beforeAll(async () => {
-  snapshot = await createSnapshot();
-});
 
 describe("problem set", () => {
   it("has 15–20 problems", () => {
@@ -41,7 +34,7 @@ describe("problem set", () => {
 describe.each(problems)("$number. $title", (problem) => {
   let verification: ProblemVerification;
   beforeAll(async () => {
-    verification = await verifyProblem(problem, snapshot);
+    verification = await verifyProblem(problem);
   });
 
   it("has 2–3 hidden test cases", () => {
@@ -49,20 +42,11 @@ describe.each(problems)("$number. $title", (problem) => {
     expect(problem.cases.length).toBeLessThanOrEqual(3);
   });
 
-  it("has a reference solution that passes the query guard", () => {
-    expect(checkUserQuery(problem.solutionSql)).toEqual({ ok: true });
-  });
-
-  it("sorts its reference output when row order matters", () => {
-    if (problem.orderMatters) expect(problem.solutionSql).toMatch(/\border\s+by\b/i);
-  });
-
-  it("returns rows on the sample data, so Run has something to show", () => {
-    expect(verification.sampleExpected.rows.length).toBeGreaterThan(0);
+  it("passes the rules every published problem must meet", () => {
+    expect(checkPublishRules(problem, verification)).toEqual([]);
   });
 
   it("describes every sample table for the schema viewer", () => {
-    expect(verification.sampleTables.length).toBeGreaterThan(0);
     for (const table of verification.sampleTables) {
       expect(table.columns.length).toBeGreaterThan(0);
       expect(table.rows.columns.map((c) => c.name)).toEqual(table.columns.map((c) => c.name));
@@ -71,10 +55,5 @@ describe.each(problems)("$number. $title", (problem) => {
 
   it("runs the reference on every hidden case", () => {
     expect(verification.cases.map((c) => c.name)).toEqual(problem.cases.map((c) => c.name));
-  });
-
-  it("rejects every known pitfall with some hidden case", () => {
-    const uncaught = verification.pitfalls.filter((p) => p.caughtBy === null).map((p) => p.name);
-    expect(uncaught).toEqual([]);
   });
 });

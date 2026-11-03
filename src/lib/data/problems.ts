@@ -17,16 +17,15 @@ export interface ProblemDetail extends ProblemSummary {
   schemaSql: string;
   sampleDataSql: string;
   orderMatters: boolean;
-  /** Reference output on the sample data. Null until the seed script has computed it. */
+  /** Reference output on the sample data. Computed when the problem is published. */
   sampleExpected: RawResult | null;
-  /** Sample tables for the schema viewer. Null until the seed script has computed them. */
+  /** Sample tables for the schema viewer. Computed when the problem is published. */
   sampleTables: SampleTable[] | null;
 }
 
 /*
- * Problems are public and change only when the seed script runs, so they're cached for everyone
- * ("use cache") instead of being fetched per request. The `problems` tag lets a future admin
- * action revalidate them on demand.
+ * Problems are public and change only when an admin saves one, so they're cached for everyone
+ * ("use cache") instead of being fetched per request. Admin saves expire the `problems` tag.
  */
 
 export async function getProblemSummaries(): Promise<ProblemSummary[]> {

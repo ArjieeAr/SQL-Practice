@@ -1,18 +1,21 @@
-import type { PGlite } from "@electric-sql/pglite";
+// @ts-check
+/**
+ * Describes the tables in a loaded sandbox for the problem's schema viewer. Plain ESM + JSDoc
+ * because it runs inside the verification worker (see engine.mjs).
+ */
+import { runReadOnlyQuery } from "./engine.mjs";
 
-import { runReadOnlyQuery } from "@/lib/sandbox/engine.mjs";
-import { LIMITS } from "@/lib/sql/limits";
+/** @typedef {import("../problems/preview").SampleTable} SampleTable */
 
-import type { SampleTable } from "./preview";
-
-interface ColumnRow {
-  table_name: string;
-  column_name: string;
-  data_type: string;
-  not_null: string; // the sandbox returns raw Postgres text: 't' / 'f'
-  primary_key: string;
-  references_column: string | null;
-}
+/**
+ * @typedef {object} ColumnRow
+ * @property {string} table_name
+ * @property {string} column_name
+ * @property {string} data_type
+ * @property {string} not_null the sandbox returns raw Postgres text: 't' / 'f'
+ * @property {string} primary_key
+ * @property {string | null} references_column
+ */
 
 /** Tables in creation order, each column with its PK/FK role, from the system catalogs. */
 const COLUMNS_SQL = `
@@ -39,11 +42,18 @@ const COLUMNS_SQL = `
   ORDER BY c.oid, a.attnum
 `;
 
-/** Describe every table in a loaded sandbox, with its rows, for the problem's schema viewer. */
-export async function introspectTables(db: PGlite): Promise<SampleTable[]> {
-  const { rows } = await db.query<ColumnRow>(COLUMNS_SQL);
+/**
+ * Describe every table in a loaded sandbox, with its rows.
+ *
+ * @param {import("@electric-sql/pglite").PGlite} db
+ * @param {number} maxRows
+ * @returns {Promise<SampleTable[]>}
+ */
+export async function introspectTables(db, maxRows) {
+  const { rows } = /** @type {{ rows: ColumnRow[] }} */ (await db.query(COLUMNS_SQL));
 
-  const tables = new Map<string, SampleTable["columns"]>();
+  /** @type {Map<string, SampleTable["columns"]>} */
+  const tables = new Map();
   for (const row of rows) {
     const columns = tables.get(row.table_name) ?? [];
     columns.push({
@@ -56,15 +66,12 @@ export async function introspectTables(db: PGlite): Promise<SampleTable[]> {
     tables.set(row.table_name, columns);
   }
 
-  const result: SampleTable[] = [];
+  /** @type {SampleTable[]} */
+  const result = [];
   for (const [name, columns] of tables) {
     const quoted = `"${name.replaceAll('"', '""')}"`;
     // TABLE returns rows in insertion order, which is how the sample data was written.
-    result.push({
-      name,
-      columns,
-      rows: await runReadOnlyQuery(db, `TABLE ${quoted}`, LIMITS.maxResultRows),
-    });
+    result.push({ name, columns, rows: await runReadOnlyQuery(db, `TABLE ${quoted}`, maxRows) });
   }
   return result;
 }
